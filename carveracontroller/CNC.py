@@ -238,6 +238,7 @@ class CNC:
         "playedlines": 0,
         "playedpercent": 0,
         "playedseconds": 0,
+        "abort_requested": False,
         "atc_state": 0,
         "tool": 0,
         "feed": 0.0,

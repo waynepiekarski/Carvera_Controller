@@ -2777,6 +2777,8 @@ class Makera(RelativeLayout):
 
     alarm_triggered = False
     tool_triggered = False
+    _playback_event_active = False
+    _playback_link_lost = False
 
     used_tools = ListProperty()
     upcoming_tool = 0
@@ -3241,6 +3243,13 @@ class Makera(RelativeLayout):
 
         # Set default controller config values
         for setting in controller_config_definition:
+            # Some settings (e.g. shell-based playback event commands) only make sense on
+            # certain platforms - the OS sandbox on iOS/Android blocks spawning
+            # processes, so hide those entries there rather than offer a control
+            # that silently does nothing.
+            platforms = setting.pop("platforms", None)
+            if platforms is not None and kivy_platform not in platforms:
+                continue
             if "default" in setting:
                 Config.setdefault(setting["section"], setting["key"], setting["default"])
                 # The bool switch only recognises "0" and "1". An earlier default
@@ -3774,6 +3783,117 @@ class Makera(RelativeLayout):
         self.config_popup.btn_apply.disabled = True
         self.message_popup.lb_content.text = tr._("Language setting applied, restart Controller app to take effect !")
         self.message_popup.open()
+
+    # -----------------------------------------------------------------------
+    def _update_playback_event(self, machine_not_playing):
+        """Detect playback start/end transitions and fire the configured
+        playback event commands.
+
+        A lost link is not treated as the end of playback, since the machine
+        may still be cutting. The decision is deferred until we reconnect and
+        can see whether the machine is still playing, so auto-reconnect does
+        not produce a spurious end followed by a second start.
+        """
+        state = CNC.vars["state"]
+        if state == NOT_CONNECTED:
+            if self._playback_event_active:
+                self._playback_link_lost = True
+            return
+        if state == CONNECTED and self._playback_link_lost:
+            # Just reconnected - wait for a real status report before deciding
+            return
+
+        if not machine_not_playing:
+            if not self._playback_event_active:
+                self._playback_event_active = True
+                self._playback_link_lost = False
+                CNC.vars["abort_requested"] = False
+                self._run_playback_event_command("start")
+            return
+
+        if not self._playback_event_active:
+            return
+
+        if CNC.vars["abort_requested"] or state == "Alarm":
+            outcome = "failed_or_cancelled"
+        elif self._playback_link_lost and 0 < CNC.vars["playedlines"] < self.selected_file_line_count:
+            # Playback ended while we were disconnected. Community firmware keeps
+            # reporting the last played line until the next playback starts, so
+            # stopping short of the end of the file means it did not complete.
+            outcome = "failed_or_cancelled"
+        else:
+            outcome = "success"
+        self._playback_event_active = False
+        self._playback_link_lost = False
+        CNC.vars["abort_requested"] = False
+        self._run_playback_event_command("end", outcome)
+
+    # -----------------------------------------------------------------------
+    def _run_playback_event_command(self, event, outcome=None):
+        """Run the user-configured shell command for a playback lifecycle event.
+
+        event: "start" or "end"
+        outcome: for "end" events, one of "success" or "failed_or_cancelled"
+
+        The command is read from the "Controller" settings and only runs if
+        playback event commands are enabled there. It is executed asynchronously
+        in a background thread so it never blocks the UI or status polling.
+
+        Desktop only: iOS/Android sandbox app processes and block spawning
+        arbitrary subprocesses, so this is a no-op there even if a synced
+        config file has it enabled.
+        """
+        if kivy_platform in ("ios", "android"):
+            return
+
+        try:
+            if not Config.getboolean("carvera", "enable_playback_event_commands", fallback=False):
+                return
+            if event == "start":
+                command = Config.get("carvera", "playback_start_command", fallback="").strip()
+            elif outcome == "success":
+                command = Config.get("carvera", "playback_success_command", fallback="").strip()
+            else:
+                command = Config.get("carvera", "playback_fail_or_cancel_command", fallback="").strip()
+        except Exception:
+            logger.exception("Failed to read playback event command configuration")
+            return
+
+        if not command:
+            return
+
+        app = App.get_running_app()
+        filename = ""
+        if app is not None:
+            filename = app.selected_remote_filename or app.selected_local_filename or ""
+
+        env = os.environ.copy()
+        env["CARVERA_PLAYBACK_EVENT"] = event
+        env["CARVERA_PLAYBACK_OUTCOME"] = outcome or ""
+        env["CARVERA_PLAYBACK_FILE"] = filename
+
+        def _run(command=command, env=env, event=event, outcome=outcome):
+            try:
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                if result.returncode != 0:
+                    logger.warning(
+                        "Playback event command exited with code %s (event=%s, outcome=%s): %s",
+                        result.returncode,
+                        event,
+                        outcome,
+                        result.stderr.strip(),
+                    )
+            except Exception:
+                logger.exception("Playback event command failed (event=%s, outcome=%s)", event, outcome)
+
+        threading.Thread(target=_run, daemon=True, name=f"playback-event-{event}").start()
 
     # -----------------------------------------------------------------------
     def play(self, file_name, start_line):
@@ -7770,6 +7890,8 @@ class Makera(RelativeLayout):
                 machine_not_playing = CNC.vars["is_playing"] == 0
             else:
                 machine_not_playing = CNC.vars["playedlines"] <= 0
+
+            self._update_playback_event(machine_not_playing)
 
             # update progress bar and set selected
             if machine_not_playing:

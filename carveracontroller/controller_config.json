@@ -330,5 +330,41 @@
         "section": "carvera",
         "key": "show_playbar_tool_change_markers",
         "default": "true"
+    },
+    {
+        "type": "bool",
+        "title": "Enable Playback Event Commands",
+        "desc": "Desktop only (Windows/Mac/Linux) - not available on iOS/Android. Run shell commands on this computer when file playback starts, succeeds, or fails/is cancelled. On Windows commands run via cmd.exe, not bash. WARNING: these commands run with your full user permissions - only configure commands you trust.",
+        "section": "carvera",
+        "key": "enable_playback_event_commands",
+        "default": "false",
+        "platforms": ["win", "macosx", "linux"]
+    },
+    {
+        "type": "string",
+        "title": "Playback Start Command",
+        "desc": "Shell command to run when file playback starts (cmd.exe on Windows, sh elsewhere). Available env vars: CARVERA_PLAYBACK_EVENT, CARVERA_PLAYBACK_OUTCOME, CARVERA_PLAYBACK_FILE.",
+        "section": "carvera",
+        "key": "playback_start_command",
+        "default": "",
+        "platforms": ["win", "macosx", "linux"]
+    },
+    {
+        "type": "string",
+        "title": "Playback Success Command",
+        "desc": "Shell command to run when file playback finishes successfully (cmd.exe on Windows, sh elsewhere). Available env vars: CARVERA_PLAYBACK_EVENT, CARVERA_PLAYBACK_OUTCOME, CARVERA_PLAYBACK_FILE.",
+        "section": "carvera",
+        "key": "playback_success_command",
+        "default": "",
+        "platforms": ["win", "macosx", "linux"]
+    },
+    {
+        "type": "string",
+        "title": "Playback Failed/Cancelled Command",
+        "desc": "Shell command to run when file playback fails (alarm) or is cancelled/aborted (cmd.exe on Windows, sh elsewhere). Available env vars: CARVERA_PLAYBACK_EVENT, CARVERA_PLAYBACK_OUTCOME, CARVERA_PLAYBACK_FILE.",
+        "section": "carvera",
+        "key": "playback_fail_or_cancel_command",
+        "default": "",
+        "platforms": ["win", "macosx", "linux"]
     }
 ]

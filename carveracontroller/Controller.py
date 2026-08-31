@@ -1364,6 +1364,8 @@ class Controller:
             Clock.schedule_once(partial(self._wait_for_pause_and_continue_cmd_list_execution, remaining_commands), 0.1)
 
     def abortCommand(self):
+        # Lets the UI tell a user-aborted playback apart from one that completed
+        CNC.vars["abort_requested"] = True
         self.executeCommand("abort\n")
 
     def feedholdCommand(self):
